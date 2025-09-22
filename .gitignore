@@ -1,0 +1,21 @@
+# big or generated stuff
+results/
+data_in/
+*.sif
+*.nii
+*.nii.gz
+*.zip
+*.tar
+*.tar.gz
+
+# python cruft
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.env
+
+# macOS / editor noise
+.DS_Store
+.vscode/
