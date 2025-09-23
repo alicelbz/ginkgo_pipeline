@@ -686,7 +686,7 @@ def runPipeline(inputDicomDirectory, subjectJsonFileName, taskJsonFileName, time
                                                          subjectOutputDirectory,
                                                          "30-Normalization")
 
-                templateDirectory = '/mnt/POOL_IRM06/CONHECT/mni_icbm152_nlin_asym_09a_nifti/mni_icbm152_nlin_asym_09a'
+                templateDirectory = "/work/templates/mni_icbm152_nlin_asym_09a"
 
                 if (taskDescription["Normalization"] == 1):
 
