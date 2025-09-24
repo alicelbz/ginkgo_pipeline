@@ -1,7 +1,16 @@
 {
-  "Patients": {
-    "sub-001": {},
-    "sub-002": {},
-    "sub-003": {}
-  }
+  "subjects": [
+    {
+      "id": "sub-PR07",
+      "sessions": [
+        {
+          "id": "ses-20250106",
+          "nifti": {
+            "DWI": "sub-PR07/ses-20250106/dwi/sub-PR07_ses-20250106_acq-ABCD_dwi.nii.gz",
+            "T1w": "sub-PR07/ses-20250106/anat/sub-PR07_ses-20250106_acq-precontrast_T1w.nii.gz"
+          }
+        }
+      ]
+    }
+  ]
 }

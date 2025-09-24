@@ -7,7 +7,7 @@ SIF=/wynton/scratch/aleberre/containers/ginkgobv.sif
 
 # ---- Dataset root (BIDS) ----
 # TODO: update this once you know the real path (or override via IN=... at runtime)
-IN="${IN:-/path/to/your/dataset}"
+IN=/wynton/scratch/aleberre/projects/Ginkgo_pipeline/data_in
 
 # ---- Configs & outputs ----
 SUBJ=$PROJ/config/subjects.json
