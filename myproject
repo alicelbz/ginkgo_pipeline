@@ -2,4 +2,4 @@
 # exporting environment variables and launching application
 ################################################################################
 
-/usr/bin/python /home/leberre/myproject/Myproject.py $@
+//wynton/scratch/aleberre/projects/Ginkgo_pipeline/Myproject.py $@

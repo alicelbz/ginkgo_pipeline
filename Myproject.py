@@ -14,7 +14,7 @@ sys.path.insert( 0, os.path.join( os.sep, 'usr', 'share', 'gkg', 'python' ) )
 
 # gkg-pipeline #################################################################
 
-pyMyprojectPath = os.path.join( '/home/leberre/myproject' )
+pyMyprojectPath = os.path.join( '/wynton/scratch/aleberre/projects/Ginkgo_pipeline' )
 
 sys.path.insert( 0, os.path.join( os.sep, 'usr', 'python' ) )
 sys.path.insert( 0, pyMyprojectPath )
