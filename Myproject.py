@@ -34,10 +34,10 @@ parser.add_option( '-s', '--subjectJsonFileName',
 parser.add_option( '-t', '--taskJsonFileName',
                    dest = 'taskJsonFileName',
                    help = 'Tasks json dictionary filename' )
-parser.add_option( '-p', '--timePoint',
-                   dest = 'timePoint',
+parser.add_option( '-p', '--session',
+                   dest = 'session',
                    default = False,
-                   help = 'Myproject timePoint' )
+                   help = 'Myproject session' )
 parser.add_option( '-o', '--outputDicomDirectory',
                    dest = 'outputDicomDirectory',
                    help = 'Myproject output DICOM directory' )

@@ -1,6 +1,7 @@
 import os, json, sys, shutil
 import os, json, sys, shutil
 
+
 sys.path.insert(0, os.path.join(os.sep, 'usr', 'share', 'gkg', 'python'))
 from core.command.CommandFactory import *
 
@@ -40,7 +41,7 @@ from DiffusionMetricsInMNISpace import *
 from DiffusionMetricsInCutExtremitiesConnectivityMatrix import *
 
 from NiftiToGisConversion import runNifti2GisConversion
-from SplitDWIShells import runSplitDWIShells
+from FieldmapCorrection import runFieldmapCorrection
 
 # ---------------------------
 # helpers
@@ -147,7 +148,7 @@ def _build_description_for_conversion(nifti_session_dir):
 # main pipeline
 # ---------------------------
 
-def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, timePoint, outputDirectory, verbose):
+def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, outputDirectory, verbose):
     _ensure_dir(outputDirectory)
 
     ##############################################################################
@@ -190,15 +191,14 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, timePoint
                 subjectOutputDirectoryTemp = _ensure_dir(os.path.join(outputDirectory, subject))
                 subjectOutputDirectory = _ensure_dir(os.path.join(subjectOutputDirectoryTemp, session))
 
-                # =========================
-                # Step 00: Split DWI shells
-                # =========================
-                outputDirectorySplitShells = makeDirectory(subjectOutputDirectory, "00-SplitDWIShells")
-                runSplitDWIShells(
-                    subjectSessionDir=os.path.join(inputNiftiRoot, subject, timepoint),
-                    outDir=outputDirectorySplitShells,
-                    verbose=verbose
-                )
+                # Step 00: Fieldmap-based correction (produces dwi_fmapcorr.nii.gz)
+                #outputDirectoryFieldmap = makeDirectory(subjectOutputDirectory, "00-FieldmapCorrection")
+                #runFieldmapCorrection(
+                #    subjectSessionDir=os.path.join(inputNiftiRoot, subject, timepoint),
+                #    outputDirectory=outputDirectoryFieldmap,
+                #    verbose=verbose,
+                #    manufacturer="generic",  # GE -> "generic"; Siemens -> "SIEMENS"
+                #)
 
                 # =========================
                 # GIS conversion (T1 + per-shell DWI only)
@@ -241,7 +241,7 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, timePoint
 
                 if _safe(taskDescription, "TopUpCorrection", 0) == 1:
                     runTopUpCorrection(subjectSessionDir,
-                                       timePoint,
+                                       session,
                                        outputDirectoryTopUpCorrection,
                                        verbose)
 
@@ -758,34 +758,34 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, timePoint
               # connectivity matrix
               ##################################################################
 
-                outputDirectoryConnectivityMatrix = makeDirectory(
-                                                        subjectOutputDirectory,
-                                                        "31-ConnectivityMatrix")
+                # outputDirectoryConnectivityMatrix = makeDirectory(
+                #                                         subjectOutputDirectory,
+                #                                         "31-ConnectivityMatrix")
 
-                if ( timepoint == 'V1' ):
+                # if ( session == 'V1' ):
 
-                  subjectV1ConnectivityMatrixDirectories.append( 
-                                             outputDirectoryConnectivityMatrix )
+                #   subjectV1ConnectivityMatrixDirectories.append( 
+                #                              outputDirectoryConnectivityMatrix )
 
-                elif ( timepoint == 'V2' ):
+                # elif ( session == 'V2' ):
 
-                  subjectV2ConnectivityMatrixDirectories.append( 
-                                             outputDirectoryConnectivityMatrix )
+                #   subjectV2ConnectivityMatrixDirectories.append( 
+                #                              outputDirectoryConnectivityMatrix )
 
-                else:
+                # else:
 
-                  subjectV3ConnectivityMatrixDirectories.append( 
-                                             outputDirectoryConnectivityMatrix )
+                #   subjectV3ConnectivityMatrixDirectories.append( 
+                #                              outputDirectoryConnectivityMatrix )
 
-                if (taskDescription["ConnectivityMatrix"] == 1):
+                # if (taskDescription["ConnectivityMatrix"] == 1):
 
-                    runConnectivityMatrix( 
-                                          outputDirectoryTractographySRD,
-                                          outputDirectoryMaskFromMorphologist,
-                                          outputDirectoryFreeSurferParcellation,
-                                          outputDirectoryNormalization,
-                                          outputDirectoryConnectivityMatrix,
-                                          verbose)
+                #     runConnectivityMatrix( 
+                #                           outputDirectoryTractographySRD,
+                #                           outputDirectoryMaskFromMorphologist,
+                #                           outputDirectoryFreeSurferParcellation,
+                #                           outputDirectoryNormalization,
+                #                           outputDirectoryConnectivityMatrix,
+                #                           verbose)
 
     ############################################################################
     # building roi-to-roi connectivity template 
@@ -817,10 +817,10 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, timePoint
             subjectOutputDirectoryTemp = os.path.join(groupOutputDirectory,
                                                       str(subject))
 
-            for timepoint in timePoint.split(','):
+            for session in session.split(','):
 
                 subjectOutputDirectory = os.path.join(subjectOutputDirectoryTemp,
-                                                      timepoint)
+                                                      session)
 
                 if (verbose == True):
                     print("===================================================")
@@ -876,10 +876,10 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, timePoint
             subjectOutputDirectoryTemp = os.path.join(groupOutputDirectory,
                                                       str(subject))
 
-            for timepoint in timePoint.split(','):
+            for session in session.split(','):
 
                 subjectOutputDirectory = os.path.join(subjectOutputDirectoryTemp,
-                                                      timepoint)
+                                                      session)
 
                 if (verbose == True):
                     print("===================================================")
