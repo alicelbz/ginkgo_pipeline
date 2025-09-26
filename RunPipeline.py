@@ -40,6 +40,7 @@ from DiffusionMetricsInMNISpace import *
 from DiffusionMetricsInCutExtremitiesConnectivityMatrix import *
 
 from NiftiToGisConversion import runNifti2GisConversion
+from SplitDWIShells import runSplitDWIShells
 
 # ---------------------------
 # helpers
@@ -190,15 +191,36 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, timePoint
                 subjectOutputDirectory = _ensure_dir(os.path.join(subjectOutputDirectoryTemp, session))
 
                 # =========================
-                # GIS conversion
+                # Step 00: Split DWI shells
+                # =========================
+                outputDirectorySplitShells = makeDirectory(subjectOutputDirectory, "00-SplitDWIShells")
+                runSplitDWIShells(
+                    subjectSessionDir=os.path.join(inputNiftiRoot, subject, timepoint),
+                    outDir=outputDirectorySplitShells,
+                    verbose=verbose
+                )
+
+                # =========================
+                # GIS conversion (T1 + per-shell DWI only)
                 # =========================
                 outputDirectoryGisConversion = makeDirectory(subjectOutputDirectory, "01-GisConversion")
 
                 if _safe(taskDescription, "GisConversion", 0) == 1:
-                    description = _build_description_for_conversion(subjectSessionDir)
+                    # Always convert T1w (Morphologist needs GIS T1)
+                    description = {
+                        "T1w": "anat/T1w.nii.gz",
+                    }
+
+                    # Convert ONLY the split shells (no full DWI)
+                    split_dir = outputDirectorySplitShells
+                    for tag in ("b0000", "b0500", "b1000", "b2000", "b3000"):
+                        cand = os.path.join(split_dir, f"dwi_{tag}.nii.gz")
+                        if os.path.isfile(cand):
+                            # e.g., DWI_B1000.ima
+                            description[f"DWI_{tag.upper()}"] = cand
 
                     if verbose:
-                        print("[02] NIfTI -> GIS conversion")
+                        print("[01] NIfTI -> GIS conversion (T1 + per-shell only)")
                         print("     input session:", subjectSessionDir)
                         print("     map:", description)
 
@@ -208,6 +230,7 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, timePoint
                         outputDirectory=outputDirectoryGisConversion,
                         verbose=bool(verbose),
                     )
+
                 
                 ##########################################################################
                 # TopUp correction

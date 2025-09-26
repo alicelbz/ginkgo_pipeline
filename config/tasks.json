@@ -1,5 +1,6 @@
 {
 
+  "SplitDWIShells" : 1,
   "GisConversion" : 1,
   "TopUpCorrection" : 1,
   "OrientationAndBValueFileDecoding" : 1,
