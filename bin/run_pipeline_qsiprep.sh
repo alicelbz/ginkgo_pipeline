@@ -96,6 +96,21 @@ for sid, ses in iter_subj_ses(subjects):
             f.write(t1w_nii + "\n")
 
     print(f"[Stage] {sid}/{ses} -> 02-Preproc (mask={'yes' if brain_mask else 'no'}, T1w={'yes' if t1w_nii else 'no'})")
+
+    # --- create relative symlinks so container sees them ---
+    dwi_compat = os.path.join(out02, "..", "dwi")
+    dwi_compat = os.path.normpath(dwi_compat)
+    os.makedirs(dwi_compat, exist_ok=True)
+    for src_name, link_name in [
+        ("dwi_preproc.nii.gz", "dwi.nii.gz"),
+        ("dwi_preproc.bval",   "dwi.bval"),
+        ("dwi_preproc.bvec",   "dwi.bvec")
+    ]:
+        dst = os.path.join(dwi_compat, link_name)
+        if os.path.lexists(dst):
+            os.remove(dst)
+        os.symlink(os.path.join("..","02-Preproc",src_name), dst)
+
 PY
 
 # ---------- Split shells (host; uses the staged 02-Preproc trio) ----------
@@ -177,9 +192,9 @@ for sid in os.listdir(root):
         print(f"[Mask→GIS] {sid}/{ses}")
 PY
 '
-# ---------- Create raw-like dwi/ symlinks for RunPipeline input check ----------
+# ---------- Create raw-like dwi/ links (relative!) for RunPipeline input check ----------
 python3 - <<'PY'
-import os, json, sys
+import os, json, shutil
 
 OUT  = os.environ["OUT"]
 with open(os.environ["IN_SUBJ_JSON"], "r") as f:
@@ -199,26 +214,36 @@ for sid, ses in iter_subj_ses(subjects):
     base = os.path.join(OUT, sid, ses)
     src  = os.path.join(base, "02-Preproc")
     dst  = os.path.join(base, "dwi")
-    dwi  = os.path.join(src, "dwi_preproc.nii.gz")
-    bval = os.path.join(src, "dwi_preproc.bval")
-    bvec = os.path.join(src, "dwi_preproc.bvec")
-    if not (os.path.isfile(dwi) and os.path.isfile(bval) and os.path.isfile(bvec)):
+    trio = {
+        "dwi.nii.gz": os.path.join(src, "dwi_preproc.nii.gz"),
+        "dwi.bval":   os.path.join(src, "dwi_preproc.bval"),
+        "dwi.bvec":   os.path.join(src, "dwi_preproc.bvec"),
+    }
+    if not all(os.path.isfile(p) for p in trio.values()):
         print(f"[Compat] Missing preproc trio for {sid}/{ses}, skip dwi/ shim"); continue
+
     os.makedirs(dst, exist_ok=True)
-    def link(srcf, name):
+
+    for name, srcf in trio.items():
         dstf = os.path.join(dst, name)
+        # remove any existing file/link
         try:
             if os.path.islink(dstf) or os.path.exists(dstf):
                 os.remove(dstf)
-            os.symlink(srcf, dstf)
+        except FileNotFoundError:
+            pass
+
+        # create RELATIVE symlink so it works inside the container (/results is mounted)
+        try:
+            rel = os.path.relpath(srcf, start=dst)
+            os.symlink(rel, dstf)
         except Exception:
-            # fallback copy if symlink not allowed
-            import shutil; shutil.copy2(srcf, dstf)
-    link(dwi,  "dwi.nii.gz")
-    link(bval, "dwi.bval")
-    link(bvec, "dwi.bvec")
-    print(f"[Compat] Linked {sid}/{ses} dwi/ -> 02-Preproc trio")
+            # fallback: copy if symlink not permitted
+            shutil.copy2(srcf, dstf)
+
+    print(f"[Compat] dwi/ trio ready with relative links: {sid}/{ses}")
 PY
+
 
 # ---------- Run the main pipeline in container (early steps OFF) ----------
 apptainer exec --cleanenv \

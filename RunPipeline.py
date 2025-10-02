@@ -1,5 +1,4 @@
-import os, json, sys, shutil
-
+import os, json, sys, shutil, subprocess 
 
 sys.path.insert(0, os.path.join(os.sep, 'usr', 'share', 'gkg', 'python'))
 from core.command.CommandFactory import *
@@ -148,7 +147,7 @@ def _pick_distortion_method(taskDescription, session_dir):
         return "fieldmap"
     return _distortion_method_auto(session_dir)
 
-        # ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # Main pipeline (NIfTI input only; GIS only where reference pipeline used it)
 # ---------------------------------------------------------------------
 
@@ -283,20 +282,42 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
 
         # -----------------------------------------------------------------
         # 04) Split shells (on corrected 4D) → still NIfTI here
+        #     If results already exist (because we split on the host), skip.
         # -----------------------------------------------------------------
-        tmp_session = os.path.join(dir04_split, "_tmp_session")
-        _ensure_dir(os.path.join(tmp_session, "dwi"))
-        shutil.copy2(dwi_ready,  os.path.join(tmp_session, "dwi", "dwi.nii.gz"))
-        shutil.copy2(bval_ready, os.path.join(tmp_session, "dwi", "dwi.bval"))
-        shutil.copy2(bvec_ready, os.path.join(tmp_session, "dwi", "dwi.bvec"))
+        have_split = bool(glob.glob(os.path.join(dir04_split, "dwi_b*.nii.gz")))
+        if have_split:
+            if verbose:
+                print("[04] SplitDWIShells: found existing outputs -> skip")
+        else:
+            tmp_session = os.path.join(dir04_split, "_tmp_session")
+            _ensure_dir(os.path.join(tmp_session, "dwi"))
+            shutil.copy2(dwi_ready,  os.path.join(tmp_session, "dwi", "dwi.nii.gz"))
+            shutil.copy2(bval_ready, os.path.join(tmp_session, "dwi", "dwi.bval"))
+            shutil.copy2(bvec_ready, os.path.join(tmp_session, "dwi", "dwi.bvec"))
 
-        split_script = os.path.join(os.path.dirname(os.path.dirname(subj_out)), "SplitDWIShells.py")
-        subprocess.run([
-            "python3", split_script,
-            "--session", tmp_session,
-            "--outdir", dir04_split,
-            "--verbose"
-        ], check=True)
+            # Find SplitDWIShells.py robustly (container mounts your repo at /work)
+            split_script = None
+            for cand in (
+                "/work/SplitDWIShells.py",
+                os.path.join(os.path.dirname(__file__), "SplitDWIShells.py"),
+                os.path.join(os.getcwd(), "SplitDWIShells.py"),
+            ):
+                if os.path.isfile(cand):
+                    split_script = cand
+                    break
+            if split_script is None:
+                raise FileNotFoundError(
+                    "SplitDWIShells.py not found in /work or the current repo. "
+                    "Expected at /work/SplitDWIShells.py (bound from your project)."
+                )
+
+            subprocess.run([
+                "python3", split_script,
+                "--session", tmp_session,
+                "--outdir",  dir04_split,
+                "--verbose"
+            ], check=True)
+
 
         # -----------------------------------------------------------------
         # 05) GIS conversion (per shell) + T1 (GIS used where reference used it)
