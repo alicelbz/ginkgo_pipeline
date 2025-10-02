@@ -1,76 +1,62 @@
 #!/bin/bash
 set -euo pipefail
 
-# =====================
-# Project paths
-# =====================
 PROJ=/wynton/scratch/aleberre/projects/Ginkgo_pipeline
 SIF=/wynton/scratch/aleberre/containers/ginkgobv.sif
-
-# dataset root (can override at runtime: IN=/path ./run_pipeline.sh)
 IN=${IN:-$PROJ/data_in}
+OUT=${OUT:-$PROJ/results}
 SUBJ=$PROJ/config/subjects.json
 TASK=$PROJ/config/tasks.json
-OUT=$PROJ/results
 PROFILE_DEFAULT="V1"
 PROFILE="${1:-${PROFILE:-$PROFILE_DEFAULT}}"
 
-# ---- make vars visible to Python ----
-export PROJ IN SUBJ TASK OUT PROFILE
+export PROJ IN OUT SUBJ TASK PROFILE
 
-# =====================
-# Sanity checks
-# =====================
-[[ -f "$SUBJ" ]] || { echo "ERROR: subjects.json not found at $SUBJ" >&2; exit 1; }
-[[ -f "$TASK" ]] || { echo "ERROR: tasks.json not found at $TASK" >&2; exit 1; }
-[[ -d "$IN"  ]]  || { echo "ERROR: dataset path IN='$IN' does not exist." >&2; exit 1; }
+echo "=== [Env] IN=$IN  OUT=$OUT  PROFILE=$PROFILE"
+echo "=== [Env] PROJ=$PROJ  SIF=$SIF"
 
 mkdir -p "$OUT"
 
-# =====================
-# Step 00 — Split DWI shells (host Python)
-# =====================
-echo "=== [Step 00] Split DWI shells ==="
-python3 - <<'PY'
-import os, json, subprocess
+# ---------- Step 00 — Susceptibility dispatch (TopUp/Fieldmap) ----------
+echo "=== [Step 00] Susceptibility dispatch (TopUp or Fieldmap) ==="
 
-proj = os.environ["PROJ"]
-IN = os.environ["IN"]
-OUT = os.environ["OUT"]
-subj_json = os.environ["SUBJ"]
+if [[ -n "${FSL_SIF:-}" ]]; then
+  # Run FSL commands inside the FSL container, but run Python in the Ginkgo container.
+  # Bind host absolute paths to themselves so Python/FSL see the same paths.
+  export FSL_PREFIX="apptainer exec --cleanenv \
+    --bind $IN:$IN \
+    --bind $OUT:$OUT \
+    ${FSL_SIF}"
+  echo "Using FSL container via FSL_PREFIX."
+else
+  # No FSL container provided; try host FSL (PATH must contain fslmerge/topup/applytopup)
+  command -v topup >/dev/null 2>&1 || {
+    echo "ERROR: FSL 'topup' not found on host PATH."
+    echo "Hints:"
+    echo "  • Set FSL_SIF=/path/to/fsl-*.sif, or"
+    echo "  • export FSLDIR=/actual/fsl; export PATH=\"\$FSLDIR/bin:\$PATH\""
+    exit 2
+  }
+  export FSL_PREFIX=""
+fi
 
-with open(subj_json) as f:
-    j = json.load(f)
+# Run the dispatcher in Ginkgo container (it imports your Python modules)
+apptainer exec --cleanenv \
+  --bind "$PROJ":/work \
+  --bind "$IN":"$IN" \
+  --bind "$OUT":"$OUT" \
+  "$SIF" bash -lc "
+    set -e
+    export FSL_PREFIX='$FSL_PREFIX'
+    python3 /work/SusceptibilityDispatcher.py \
+      --input_root '$IN' \
+      --output_root '$OUT' \
+      --subjects_json /work/config/subjects.json \
+      --verbose
+  "
 
-def iter_subjects(j):
-    if isinstance(j, dict) and "patients" in j:
-        for sid, sess in j["patients"].items():
-            for s in sess:
-                yield sid, s
-    elif isinstance(j, dict) and "subjects" in j:
-        for r in j["subjects"]:
-            sid = r.get("id")
-            for s in r.get("sessions", []):
-                yield sid, s
-
-for sid, ses in iter_subjects(j):
-    sess_dir = os.path.join(IN, sid, ses)
-    out_dir  = os.path.join(OUT, sid, ses, "00-SplitDWIShells")
-    os.makedirs(out_dir, exist_ok=True)
-    print(f"[SplitDWIShells] {sid}/{ses}")
-    subprocess.run([
-        "python3", f"{proj}/SplitDWIShells.py",
-        "--session", sess_dir,
-        "--outdir", out_dir,
-        "--verbose"
-    ], check=True)
-PY
-
-# =====================
-# Step 01+ — Run the main Ginkgo pipeline inside container
-# =====================
+# ---------- Step 01+ — Main pipeline inside Ginkgo container ----------
 echo "=== [Ginkgo Pipeline] Running in container ==="
-
 apptainer exec --cleanenv \
   --bind "$PROJ":/work \
   --bind "$IN":/data_in \
@@ -85,4 +71,3 @@ apptainer exec --cleanenv \
       -o /results \
       --verbose
   "
-

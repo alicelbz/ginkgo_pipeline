@@ -1,44 +1,73 @@
 {
+  // =====================
+  // Core preprocessing
+  // =====================
+  "DistortionCorrection": "auto",   // "auto" | "topup" | "fieldmap"
+  "EddyCurrentCorrection": 0,       // 1 = run FSL eddy (recommended)
+  "OutlierCorrection": 0,           // 1 = run additional outlier removal after eddy
+  "SplitDWIShells": 0,              // 1 = split shells after distortion/eddy/outlier
+  "GisConversion": 0,               // convert split shells + T1 into .ima
+  "OrientationAndBValueFileDecoding": 0,
+  "QSpaceSamplingAddition": 0,
+  "Morphologist": 0,
 
-  "SplitDWIShells" : 0,
-  "GisConversion" : 1,
-  "TopUpCorrection" : 0,
-  "OrientationAndBValueFileDecoding" : 0,
-  "QSpaceSamplingAddition" : 0,
-  "Morphologist" : 0,
-  "OutlierCorrection" : 0,
-  "EddyCurrentCorrection" : 0,
-  "LocalModelingDTI-B0500" : 0,
-  "LocalModelingDTI-B1000" : 0,
-  "LocalModelingDTI-B2000" : 0,
-  "LocalModelingDTI-B3000" : 0,
-  "LocalModelingDTI-Multiple-Shell" : 0,
-  "LocalModelingQBI-B0500" : 0,
-  "LocalModelingQBI-B1000" : 0,
-  "LocalModelingQBI-B2000" : 0,
-  "LocalModelingQBI-B3000" : 0,
-  "LocalModelingQBI-Multiple-Shell" : 0,
-  "NoddiMicrostructureField" : 0,
-  "TractographySRD" : 0,
-  "FiberLengthHistogramSRD" : 0,
-  "LongFiberLabellingSRD" : 0,
-  "ShortFiberLabellingSRD" : 0,
-  "DiffusionMetricsAlongLongBundlesSRD" : 0,
-  "DiffusionMetricsAlongShortBundlesSRD" : 0,
-  "DiffusionMetricsAlongCutExtremitiesLongBundlesSRD" : 0,
-  "DiffusionMetricsAlongCutExtremitiesShortBundlesSRD" : 0,
-  "FreesurferParcellation" : 0,
-  "DiffusionMetricsInROIs" : 0,
-  "FastSegmentation" : 0,
-  "DiffusionMetricsInWhiteGreyMatter" : 0,
-  "DiffusionMetricsInHippROIs" : 0,
-  "Normalization" : 0,
-  "ConnectivityMatrix" : 0,
-  "FullConnectivityTemplate" : 0,
-  "DiffusionMetricsInHippocampiConnectivityTemplate" : 0,
-  "DiffusionMetricsInFullConnectivityTemplate" : 0,
-  "DiffusionMetricsInConnectivityMatrix" : 0,
-  "DiffusionMetricsInMNISpace" : 0,
-  "DiffusionMetricsInCutExtremitiesConnectivityMatrix" : 0
+  // =====================
+  // Diffusion modeling (DTI)
+  // =====================
+  "LocalModelingDTI-B0500": 0,
+  "LocalModelingDTI-B1000": 0,
+  "LocalModelingDTI-B2000": 0,
+  "LocalModelingDTI-B3000": 0,
+  "LocalModelingDTI-Multiple-Shell": 0,
 
+  // =====================
+  // Diffusion modeling (QBI)
+  // =====================
+  "LocalModelingQBI-B0500": 0,
+  "LocalModelingQBI-B1000": 0,
+  "LocalModelingQBI-B2000": 0,
+  "LocalModelingQBI-B3000": 0,
+  "LocalModelingQBI-Multiple-Shell": 0,
+
+  // =====================
+  // Microstructure & tractography
+  // =====================
+  "NoddiMicrostructureField": 0,
+  "TractographySRD": 0,
+  "FiberLengthHistogramSRD": 0,
+  "LongFiberLabellingSRD": 0,
+  "ShortFiberLabellingSRD": 0,
+
+  // =====================
+  // Bundle metrics
+  // =====================
+  "DiffusionMetricsAlongLongBundlesSRD": 0,
+  "DiffusionMetricsAlongCutExtremitiesLongBundlesSRD": 0,
+  "DiffusionMetricsAlongShortBundlesSRD": 0,
+  "DiffusionMetricsAlongCutExtremitiesShortBundlesSRD": 0,
+
+  // =====================
+  // Structural / segmentation
+  // =====================
+  "FreesurferParcellation": 0,
+  "FastSegmentation": 0,
+
+  // =====================
+  // ROI / WM-GM metrics
+  // =====================
+  "DiffusionMetricsInROIs": 0,
+  "DiffusionMetricsInWhiteGreyMatter": 0,
+  "DiffusionMetricsInHippROIs": 0,
+
+  // =====================
+  // Normalization & connectivity
+  // =====================
+  "Normalization": 0,
+  "ConnectivityMatrix": 0,
+  "FullConnectivityTemplate": 0,
+  "DiffusionMetricsInHippocampiConnectivityTemplate": 0,
+  "DiffusionMetricsInFullConnectivityTemplate": 0,
+  "DiffusionMetricsInConnectivityMatrix": 0,
+  "DiffusionMetricsInMNISpace": 0,
+  "DiffusionMetricsInCutExtremitiesConnectivityMatrix": 0
 }

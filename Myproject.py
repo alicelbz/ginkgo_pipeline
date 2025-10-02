@@ -60,7 +60,7 @@ from RunPipeline import *
 runPipeline( options.inputDicomDirectory,
              options.subjectJsonFileName,
              options.taskJsonFileName,
-             options.timePoint,
+             options.session,
              options.outputDicomDirectory,
              options.verbose )
 

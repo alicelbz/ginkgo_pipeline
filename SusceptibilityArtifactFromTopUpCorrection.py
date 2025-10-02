@@ -1,175 +1,152 @@
-import os, json, sys, shutil
-sys.path.insert( 0, os.path.join( os.sep, 'usr', 'share', 'gkg', 'python' ) )
+# SusceptibilityArtifactFromTopUpCorrection.py
+import os, json
 from core.command.CommandFactory import *
-
 from CopyFileDirectoryRm import *
 
-def getSize( fileNameIma ):
+FSL_PREFIX = os.environ.get("FSL_PREFIX", "").strip()
+def _fsl(cmd):
+    # run FSL command either on host or via container prefix
+    full = f"{FSL_PREFIX} {cmd}" if FSL_PREFIX else cmd
+    print(full); _fsl(full)
 
-  f = open( fileNameIma[ : -3 ] + 'dim', 'r' )
-  lines = f.readlines()
-  f.close()
-  line1 = lines[ 0 ].split()
-  sizeX = int( line1[ 0 ] )
-  sizeY = int( line1[ 1 ] )
-  sizeZ = int( line1[ 2 ] )
-  sizeT = int( line1[ 3 ] )
+def _safe_load_json(p):
+    try:
+        with open(p, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-  return [ sizeX, sizeY, sizeZ, sizeT ]
+def _vec_from_pe(phase_dir):
+    """
+    BIDS PhaseEncodingDirection → topup PE vector.
+    'i'/'i-' → (±1,0,0), 'j'/'j-' → (0,±1,0), 'k'/'k-' → (0,0,±1)
+    """
+    if not phase_dir:
+        raise ValueError("PhaseEncodingDirection manquante")
+    axis = phase_dir[0]
+    sign = -1 if phase_dir.endswith('-') else 1
+    if axis == 'i': return ( 1*sign, 0, 0)
+    if axis == 'j': return ( 0, 1*sign, 0)
+    if axis == 'k': return ( 0, 0, 1*sign)
+    raise ValueError(f"PhaseEncodingDirection inconnue: {phase_dir}")
 
-def runTopUpCorrection( subjectDirectoryNiftiConversion,
-                        description,
-                        differentTopUpAcquisitions,
-                        timePoint,
-                        outputDirectory,
-                        verbose ):
-                      
-  
-  if ( verbose == True ):
-  
-    print( "SUSCEPTIBILITY ARTIFACT CORRECTION FROM TOP UP" )
-    print( "-------------------------------------------------------------" )
+def runTopUpCorrection(
+    subjectDirectoryNiftiConversion,   # ex: .../data_in/sub-PR08/ses-20250723
+    outputDirectory,                   # ex: .../results/sub-PR08/ses-.../01-DistortionCorrection
+    verbose
+):
+    """
+    Utilise deux EPI b0 opposés (AP/PA) placés dans:
+      <session>/fmap/AP.nii.gz + AP.json  (PhaseEncodingDirection p.ex. 'j-')
+      <session>/fmap/PA.nii.gz + PA.json  (PhaseEncodingDirection p.ex. 'j')
 
-  # computing transformation from blip-up & blip-down references
-  fileNameB0TopUpReferences = os.path.join( outputDirectory,
-                                            'topup_references' )
-         
-  fileNameB01Up = os.path.join( subjectDirectoryNiftiConversion, 
-                                'b0-b2500-06dir-PEP1.nii.gz' )
- # fileNameB01Dn = os.path.join( subjectDirectoryNiftiConversion, 
- #                               'b0-b2500-60dir-PEP0.nii.gz' )
-  fileNameB02Dn = os.path.join( subjectDirectoryNiftiConversion, 
-                                'b0-b1500-45dir-PEP0.nii.gz' )
- # fileNameB03Dn = os.path.join( subjectDirectoryNiftiConversion, 
- #                               'b0-b0200-30dir-PEP0.nii.gz' )
+    Corrige le 4D DWI:
+      <session>/dwi/dwi.nii.gz  ->  <output>/dwi_dc.nii.gz
+    """
 
-  if timePoint in differentTopUpAcquisitions:
+    if verbose:
+        print("SUSCEPTIBILITY ARTIFACT CORRECTION FROM TOPUP")
+        print("-------------------------------------------------------------")
 
-    if "TopUpReferenceDn" in differentTopUpAcquisitions[ timePoint ]:
+    os.makedirs(outputDirectory, exist_ok=True)
 
-      fileNameB02Dn = os.path.join( subjectDirectoryNiftiConversion, 
-                                    differentTopUpAcquisitions[ timePoint ][ "TopUpReferenceDn" ] )
-      
-    if "TopUpReferenceUp" in differentTopUpAcquisitions[ timePoint ]:
+    fmap_dir = os.path.join(subjectDirectoryNiftiConversion, "fmap")
+    dwi_dir  = os.path.join(subjectDirectoryNiftiConversion, "dwi")
+    ap_nii   = os.path.join(fmap_dir, "AP.nii.gz")
+    pa_nii   = os.path.join(fmap_dir, "PA.nii.gz")
+    ap_json  = os.path.join(fmap_dir, "AP.json")
+    pa_json  = os.path.join(fmap_dir, "PA.json")
+    dwi_4d   = os.path.join(dwi_dir, "dwi.nii.gz")
+    dwi_json = os.path.join(dwi_dir, "dwi.json")  # si disponible
 
-      fileNameB01Up = os.path.join( subjectDirectoryNiftiConversion, 
-                                    differentTopUpAcquisitions[ timePoint ][ "TopUpReferenceUp" ] )
+    # Garde-fous
+    if not (os.path.isfile(ap_nii) and os.path.isfile(pa_nii)
+            and os.path.isfile(ap_json) and os.path.isfile(pa_json)):
+        print(f"[WARN] AP/PA introuvables dans {fmap_dir}; topup ignoré.")
+        return
 
-                                   
+    if not os.path.isfile(dwi_4d):
+        print(f"[WARN] DWI 4D introuvable: {dwi_4d}; topup ignoré.")
+        return
 
-  # command = 'fslmerge ' + \
-  #            ' -t ' + fileNameB0TopUpReferences + ' ' + \
-  #            fileNameB01Up + ' ' + \
-  #            fileNameB01Dn + ' ' + \
-  #            fileNameB02Dn + ' ' + \
-  #            fileNameB03Dn
-  command = 'fslmerge ' + \
-             ' -t ' + fileNameB0TopUpReferences + ' ' + \
-             fileNameB01Up + ' ' + \
-             fileNameB02Dn
-  print( command )
-  os.system( command )
+    # Charger metadonnées
+    ap = _safe_load_json(ap_json)
+    pa = _safe_load_json(pa_json)
+    ap_dir = ap.get("PhaseEncodingDirection")
+    pa_dir = pa.get("PhaseEncodingDirection")
+    ap_trt = float(ap.get("TotalReadoutTime", 0))
+    pa_trt = float(pa.get("TotalReadoutTime", 0))
 
-  # creating the acquisition parameters text file
-  fileNameTopUpParameters = os.path.join( outputDirectory,
-                                          'top_up_acquisition_parameters.txt' )
-  # file = open( fileNameTopUpParameters, 'w' )
-  # file.write( '0 1 0 0.052\n' )
-  # file.write( '0 -1 0 0.052\n' )
-  # file.write( '0 -1 0 0.052\n' )
-  # file.write( '0 -1 0 0.052' )
-  # file.close()
+    if verbose:
+        print(f"AP: dir={ap_dir}  TRt={ap_trt}")
+        print(f"PA: dir={pa_dir}  TRt={pa_trt}")
 
-  file = open( fileNameTopUpParameters, 'w' )
-  file.write( '0 1 0 0.052\n' )
-  file.write( '0 -1 0 0.052' )
-  file.close()
+    # Construire acqparams (ordre = AP puis PA)
+    pe_ap = _vec_from_pe(ap_dir)
+    pe_pa = _vec_from_pe(pa_dir)
+    acqparams = os.path.join(outputDirectory, "top_up_acquisition_parameters.txt")
+    with open(acqparams, "w") as fp:
+        fp.write(f"{pe_ap[0]} {pe_ap[1]} {pe_ap[2]} {ap_trt:.6f}\n")
+        fp.write(f"{pe_pa[0]} {pe_pa[1]} {pe_pa[2]} {pa_trt:.6f}\n")
 
-  ###
-  # echo spacing : 0.325
-  # epi factor : 160
-  # 0.052 = 0.001*0.325*160
-  ###
+    # Merge AP/PA (ordre cohérent avec acqparams)
+    merged = os.path.join(outputDirectory, "topup_references")
+    cmd_merge = f"fslmerge -t {merged} {ap_nii} {pa_nii}"
+    print(cmd_merge); _fsl(cmd_merge)
 
-  # computing top-up transformation
-  fileNameTopUpTransformation = os.path.join( outputDirectory,
-                                              'top_up_transformation' )
-  command = 'topup ' + \
-            ' --imain=' + fileNameB0TopUpReferences + ' ' + \
-            ' --datain=' + fileNameTopUpParameters + ' ' + \
-            ' --config=b02b0.cnf' + ' ' + \
-            ' --out=' + fileNameTopUpTransformation + ' ' +  \
-            ' -v'
-  print( command )
-  os.system( command )
+    # topup
+    topup_base = os.path.join(outputDirectory, "top_up_transformation")
+    cmd_topup = (
+        f"topup --imain={merged} "
+        f"--datain={acqparams} "
+        f"--config=b02b0.cnf --out={topup_base} -v"
+    )
+    print(cmd_topup); _fsl(cmd_topup)
 
-  # applying top-up to NIFTI DWI
-  for key in sorted( description.keys() ):
+    # Choix de inindex selon la polarité du DWI principal
+    dwi_dir_flag = None
+    dj = _safe_load_json(dwi_json) if os.path.isfile(dwi_json) else {}
+    dwi_dir_flag = dj.get("PhaseEncodingDirection")
+    # Si le DWI a même PE que AP.json → inindex=1 ; s'il a la PE de PA.json → inindex=2
+    # Sinon, par défaut: 1
+    if dwi_dir_flag == ap_dir:
+        inindex = 1
+    elif dwi_dir_flag == pa_dir:
+        inindex = 2
+    else:
+        inindex = 1
+        if verbose:
+            print(f"[INFO] DWI PhaseEncodingDirection={dwi_dir_flag} inconnu/absent; inindex=1 par défaut.")
 
-    if ( key.startswith( "dw" ) ) and ( key.endswith( "PEP0" ) ):
-  
-      fileNameDwi = os.path.join( subjectDirectoryNiftiConversion,
-                                  key + '.nii.gz' )
-      fileNameOut = os.path.join( outputDirectory, key[:-5] + '.nii.gz' )
-      command = 'applytopup ' + \
-                ' --imain=' + fileNameDwi + \
-                ' --datain=' + fileNameTopUpParameters + \
-                ' --inindex=2 ' + \
-                ' --topup=' + fileNameTopUpTransformation + \
-                ' --method=jac ' + \
-                ' --interp=spline ' + \
-                ' --out=' + fileNameOut + \
-                ' --verbose'
-      print( command )
-      os.system( command )
+    # Appliquer au 4D DWI
+    corrected = os.path.join(outputDirectory, "dwi_dc.nii.gz")  # <- nom attendu par la nouvelle pipeline
+    cmd_apply = (
+        f"applytopup --imain={dwi_4d} "
+        f"--datain={acqparams} --inindex={inindex} "
+        f"--topup={topup_base} --method=jac --interp=spline "
+        f"--out={corrected} --verbose"
+    )
+    print(cmd_apply); _fsl(cmd_apply)
 
-      fileNameOutGis = os.path.join( outputDirectory, key[:-5] + '.ima' )
+    # (Optionnel) conversion GIS immédiate — pas nécessaire car on convertira par shell après eddy+split.
+    # Je la laisse pour compat, mais OK de la commenter si tu préfères.
+    try:
+        corrected_gis = os.path.join(outputDirectory, "dwi_dc.ima")
+        CommandFactory().executeCommand({
+            "algorithm": "Nifti2GisConverter",
+            "parameters": {
+                "fileNameIn": str(corrected),
+                "fileNameOut": str(corrected_gis),
+                "outputFormat": "gis",
+                "ascii": False,
+                "verbose": verbose,
+            },
+            "verbose": verbose,
+        })
+        removeMinf(corrected_gis)
+    except Exception as e:
+        # Ne bloque pas la pipeline si conversion GIS immédiate échoue.
+        print(f"[WARN] Nifti2GisConverter a échoué (optionnel): {e}")
 
-      CommandFactory().executeCommand(
-        { 'algorithm' : 'Nifti2GisConverter',
-          'parameters' : \
-          { 'fileNameIn' : str( fileNameOut ),
-            'fileNameOut' : str( fileNameOutGis ),
-            'outputFormat' : 'gis',
-            'ascii' : False,
-            'verbose' : verbose
-          },
-          'verbose' : verbose
-        } )
-      removeMinf( fileNameOutGis )
-
-    elif ( key.startswith( "dw" ) ) and ( key.endswith( "PEP1" ) ):
-  
-      fileNameDwi = os.path.join( subjectDirectoryNiftiConversion,
-                                  key + '.nii.gz' )
-      fileNameOut = os.path.join( outputDirectory, key[:-5] + '.nii.gz' )
-      command = 'applytopup ' + \
-                ' --imain=' + fileNameDwi + \
-                ' --datain=' + fileNameTopUpParameters + \
-                ' --inindex=1 ' + \
-                ' --topup=' + fileNameTopUpTransformation + \
-                ' --method=jac ' + \
-                ' --interp=spline ' + \
-                ' --out=' + fileNameOut + \
-                ' --verbose'
-      print( command )
-      os.system( command )
-
-      fileNameOutGis = os.path.join( outputDirectory, key[:-5] + '.ima' )
-
-      CommandFactory().executeCommand(
-        { 'algorithm' : 'Nifti2GisConverter',
-          'parameters' : \
-          { 'fileNameIn' : str( fileNameOut ),
-            'fileNameOut' : str( fileNameOutGis ),
-            'outputFormat' : 'gis',
-            'ascii' : False,
-            'verbose' : verbose
-          },
-          'verbose' : verbose
-        } )
-      removeMinf( fileNameOutGis )
-
-  if ( verbose == True ):
-
-    print( "-------------------------------------------------------------" )
+    if verbose:
+        print("-------------------------------------------------------------")
