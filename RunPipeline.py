@@ -1,4 +1,5 @@
 import os, json, sys, shutil, subprocess 
+import numpy as np
 
 sys.path.insert(0, os.path.join(os.sep, 'usr', 'share', 'gkg', 'python'))
 from core.command.CommandFactory import *
@@ -146,6 +147,53 @@ def _pick_distortion_method(taskDescription, session_dir):
     if _safe(taskDescription, "FieldmapCorrection", 0) == 1:
         return "fieldmap"
     return _distortion_method_auto(session_dir)
+
+def _attach_gradients_to_gis(ima_path, bval_path, bvec_path, verbose=False):
+    """
+    Attach gradients to a GIS volume by writing MINF sidecars:
+      - <basename>.dim.minf  [PRIMARY for GIS]
+      - <basename>.minf      [extra]
+      - <basename>.ima.minf  [extra]
+    Attributes:
+      'diffusion_gradient_orientations' : [ [gx,gy,gz], ... ]
+      'diffusion_b_values'              : [ b1, b2, ... ]
+    """
+    # Read bvecs (3 rows: x, y, z)
+    with open(bvec_path, "r") as f:
+        rows = [ln.strip().split() for ln in f if ln.strip()]
+    if len(rows) < 3:
+        raise RuntimeError(f"Invalid .bvec format: {bvec_path}")
+
+    grads = list(map(list, zip(*[[float(x) for x in row] for row in rows])))
+
+    # Read bvals
+    with open(bval_path, "r") as f:
+        bvals = [float(x) for x in f.read().strip().split()]
+
+    if len(bvals) != len(grads):
+        raise RuntimeError(
+            f"bval/bvec length mismatch: {len(bvals)} vs {len(grads)} "
+            f"({bval_path} / {bvec_path})"
+        )
+
+    attrs = {
+        'diffusion_gradient_orientations': grads,
+        'diffusion_b_values': bvals,
+    }
+    body = "attributes = " + repr(attrs) + "\n"
+
+    base, ext = os.path.splitext(ima_path)         # base=/.../DWI_b0500 , ext=.ima
+    minf_dim  = base + ".dim.minf"                 # PRIMARY for GIS
+    minf_raw  = base + ".minf"                     # extra
+    minf_ima  = ima_path + ".minf"                 # extra
+
+    for p in (minf_dim, minf_raw, minf_ima):
+        with open(p, "w") as f:
+            f.write(body)
+        if verbose:
+            print(f"[Attach] wrote {os.path.basename(p)}")
+
+
 
 # ---------------------------------------------------------------------
 # Main pipeline (NIfTI input only; GIS only where reference pipeline used it)
@@ -363,6 +411,44 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
             removeMinf(out_ima)
 
         # -----------------------------------------------------------------
+        # 05b) Ensure a T2 surrogate for modeling (use b0 as proxy)
+        # -----------------------------------------------------------------
+        b0_nii = os.path.join(dir04_split, "dwi_b0000.nii.gz")
+        t2_ima = os.path.join(dir04_split, "t2_wo_eddy_current.ima")
+        if os.path.isfile(b0_nii) and not os.path.isfile(t2_ima):
+            CommandFactory().executeCommand({
+                "algorithm": "Nifti2GisConverter",
+                "parameters": {
+                    "fileNameIn":  str(b0_nii),
+                    "fileNameOut": str(t2_ima),
+                    "outputFormat":"gis",
+                    "ascii": False,
+                    "verbose": verbose
+                },
+                "verbose": verbose
+            })
+            # keep .minf: modeling doesn’t need one for T2
+
+        # -----------------------------------------------------------------
+        # 05c) Attach gradients/bvals to each per-shell GIS
+        # (so DwiTensorField finds 'diffusion_gradient_orientations')
+        # -----------------------------------------------------------------
+        shell_map = {
+            "b0500": ("dwi_b0500.bval", "dwi_b0500.bvec", "DWI_b0500.ima"),
+            "b1000": ("dwi_b1000.bval", "dwi_b1000.bvec", "DWI_b1000.ima"),
+            "b2000": ("dwi_b2000.bval", "dwi_b2000.bvec", "DWI_b2000.ima"),
+            "b3000": ("dwi_b3000.bval", "dwi_b3000.bvec", "DWI_b3000.ima"),
+        }
+        for tag,(bval_name,bvec_name,ima_name) in shell_map.items():
+            bval_p = os.path.join(dir04_split, bval_name)
+            bvec_p = os.path.join(dir04_split, bvec_name)
+            ima_p  = os.path.join(dir05_gis,  ima_name)
+            if os.path.isfile(ima_p) and os.path.isfile(bval_p) and os.path.isfile(bvec_p):
+                try:
+                    _attach_gradients_to_gis(ima_p, bval_p, bvec_p, verbose=verbose)
+                except Exception as e:
+                    print(f"[WARN] Could not attach gradients to {ima_p}: {e}")
+# -----------------------------------------------------------------
         # 06) Orientation & BValue decoding (bridge GIS metadata + NIfTI)
         # -----------------------------------------------------------------
         if _safe(taskDescription, "OrientationAndBValueFileDecoding", 1) == 1:

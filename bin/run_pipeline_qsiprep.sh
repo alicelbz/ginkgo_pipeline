@@ -97,9 +97,8 @@ for sid, ses in iter_subj_ses(subjects):
 
     print(f"[Stage] {sid}/{ses} -> 02-Preproc (mask={'yes' if brain_mask else 'no'}, T1w={'yes' if t1w_nii else 'no'})")
 
-    # --- create relative symlinks so container sees them ---
-    dwi_compat = os.path.join(out02, "..", "dwi")
-    dwi_compat = os.path.normpath(dwi_compat)
+    # --- create relative symlinks so container sees them under /results/<sid>/<ses>/dwi ---
+    dwi_compat = os.path.normpath(os.path.join(out02, "..", "dwi"))
     os.makedirs(dwi_compat, exist_ok=True)
     for src_name, link_name in [
         ("dwi_preproc.nii.gz", "dwi.nii.gz"),
@@ -110,7 +109,6 @@ for sid, ses in iter_subj_ses(subjects):
         if os.path.lexists(dst):
             os.remove(dst)
         os.symlink(os.path.join("..","02-Preproc",src_name), dst)
-
 PY
 
 # ---------- Split shells (host; uses the staged 02-Preproc trio) ----------
@@ -158,15 +156,17 @@ for sid, ses in iter_subj_ses(subs):
     print(f"[Split] {sid}/{ses} OK")
 PY
 
-# ---------- Convert QSIPrep mask -> GIS & identity transforms (in container) ----------
+# ---------- Container: mask->GIS (+optional T1) AND gradient injection (single, idempotent block) ----------
 apptainer exec --cleanenv \
   --bind "$PROJ":/work \
   --bind "$OUT":/results \
   "$SIF" bash -lc '
 set -e
 export PYTHONPATH="/usr/share/gkg/python:${PYTHONPATH:-}"
+
+# 1) QSIPrep mask/T1 -> GIS
 python3 - <<PY
-import os, sys, subprocess
+import os, subprocess
 root="/results"
 for sid in os.listdir(root):
     sdir=os.path.join(root,sid)
@@ -177,7 +177,6 @@ for sid in os.listdir(root):
         stash=os.path.join(b,"_qsiprep_mask.txt")
         if not os.path.isfile(stash): continue
         with open(stash) as f: mask=f.read().strip()
-        # (optional) T1 path if you stashed it, else empty
         t1_stash=os.path.join(b,"_qsiprep_t1.txt")
         t1 = open(t1_stash).read().strip() if os.path.isfile(t1_stash) else ""
         outdir=os.path.join(b,"08-MaskFromMorphologistPipeline")
@@ -191,61 +190,51 @@ for sid in os.listdir(root):
         subprocess.run(cmd, check=True)
         print(f"[Mask→GIS] {sid}/{ses}")
 PY
-'
-# ---------- Create raw-like dwi/ links (relative!) for RunPipeline input check ----------
-python3 - <<'PY'
-import os, json, shutil
 
-OUT  = os.environ["OUT"]
-with open(os.environ["IN_SUBJ_JSON"], "r") as f:
-    subjects = json.load(f)
+# 2) Inject gradients once, idempotent
+python3 - <<PY
+import os, subprocess, json
+root="/results"
+shells=["b0500","b1000","b2000","b3000"]
+for sid in os.listdir(root):
+    sdir=os.path.join(root,sid)
+    if not os.path.isdir(sdir): continue
+    for ses in os.listdir(sdir):
+        base=os.path.join(sdir,ses)
+        g05=os.path.join(base,"05-GisConversion")
+        s04=os.path.join(base,"04-SplitDWIShells")
+        if not (os.path.isdir(g05) and os.path.isdir(s04)): 
+            continue
+        for tag in shells:
+            ima  = os.path.join(g05, f"DWI_{tag}.ima")
+            minf = f"{ima}.minf"
+            bvec = os.path.join(s04, f"dwi_{tag}.bvec")
+            bval = os.path.join(s04, f"dwi_{tag}.bval")
+            if not (os.path.isfile(ima) and os.path.isfile(bvec) and os.path.isfile(bval)):
+                continue
+            # idempotent: if orientations already present, skip
+            already=False
+            if os.path.isfile(minf):
+                try:
+                    with open(minf,"r") as f:
+                        txt=f.read()
+                    if "diffusion_gradient_orientations" in txt:
+                        already=True
+                except Exception:
+                    pass
+            if already:
+                print(f"[Gradients] {sid}/{ses} {tag} already present -> {minf}")
+                continue
 
-def iter_subj_ses(j):
-    if isinstance(j, dict) and "subjects" in j:
-        for rec in j["subjects"]:
-            sid = rec.get("id")
-            for ses in rec.get("sessions", []):
-                yield sid, ses
-    elif isinstance(j, dict) and "patients" in j:
-        for sid, sess in j["patients"].items():
-            for ses in sess: yield sid, ses
-
-for sid, ses in iter_subj_ses(subjects):
-    base = os.path.join(OUT, sid, ses)
-    src  = os.path.join(base, "02-Preproc")
-    dst  = os.path.join(base, "dwi")
-    trio = {
-        "dwi.nii.gz": os.path.join(src, "dwi_preproc.nii.gz"),
-        "dwi.bval":   os.path.join(src, "dwi_preproc.bval"),
-        "dwi.bvec":   os.path.join(src, "dwi_preproc.bvec"),
-    }
-    if not all(os.path.isfile(p) for p in trio.values()):
-        print(f"[Compat] Missing preproc trio for {sid}/{ses}, skip dwi/ shim"); continue
-
-    os.makedirs(dst, exist_ok=True)
-
-    for name, srcf in trio.items():
-        dstf = os.path.join(dst, name)
-        # remove any existing file/link
-        try:
-            if os.path.islink(dstf) or os.path.exists(dstf):
-                os.remove(dstf)
-        except FileNotFoundError:
-            pass
-
-        # create RELATIVE symlink so it works inside the container (/results is mounted)
-        try:
-            rel = os.path.relpath(srcf, start=dst)
-            os.symlink(rel, dstf)
-        except Exception:
-            # fallback: copy if symlink not permitted
-            shutil.copy2(srcf, dstf)
-
-    print(f"[Compat] dwi/ trio ready with relative links: {sid}/{ses}")
+            subprocess.run([
+               "python3","/work/tools/add_gradients_to_ima.py",
+               "--ima", ima, "--bvec", bvec, "--bval", bval
+            ], check=True)
+            print(f"[Gradients] {sid}/{ses} {tag} -> {minf}")
 PY
+'
 
-
-# ---------- Run the main pipeline in container (early steps OFF) ----------
+# ---------- Run the main pipeline in container ----------
 apptainer exec --cleanenv \
   --bind "$PROJ":/work \
   --bind "$OUT":/results \
@@ -260,4 +249,3 @@ apptainer exec --cleanenv \
     -o /results \
     --verbose
 "
-
