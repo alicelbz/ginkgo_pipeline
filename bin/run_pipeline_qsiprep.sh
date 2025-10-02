@@ -143,15 +143,15 @@ for sid, ses in iter_subj_ses(subs):
     print(f"[Split] {sid}/{ses} OK")
 PY
 
-# ---------- Convert QSIPrep mask & T1 → GIS (in container) ----------
+# ---------- Convert QSIPrep mask -> GIS & identity transforms (in container) ----------
 apptainer exec --cleanenv \
   --bind "$PROJ":/work \
   --bind "$OUT":/results \
   "$SIF" bash -lc '
 set -e
+export PYTHONPATH="/usr/share/gkg/python:${PYTHONPATH:-}"
 python3 - <<PY
-import os, subprocess
-
+import os, sys, subprocess
 root="/results"
 for sid in os.listdir(root):
     sdir=os.path.join(root,sid)
@@ -159,49 +159,66 @@ for sid in os.listdir(root):
     for ses in os.listdir(sdir):
         b=os.path.join(sdir,ses)
         if not os.path.isdir(b): continue
-
-        # Ensure output dirs
-        dir05 = os.path.join(b, "05-GisConversion")
-        dir08 = os.path.join(b, "08-MaskFromMorphologistPipeline")
-        os.makedirs(dir05, exist_ok=True)
-        os.makedirs(dir08, exist_ok=True)
-
-        # T1 conversion (optional but useful downstream)
+        stash=os.path.join(b,"_qsiprep_mask.txt")
+        if not os.path.isfile(stash): continue
+        with open(stash) as f: mask=f.read().strip()
+        # (optional) T1 path if you stashed it, else empty
         t1_stash=os.path.join(b,"_qsiprep_t1.txt")
-        if os.path.isfile(t1_stash):
-            with open(t1_stash) as f: t1=f.read().strip()
-            t1_ima = os.path.join(dir05, "T1w.ima")
-            # NIfTI → GIS
-            from core.command.CommandFactory import CommandFactory
-            CommandFactory().executeCommand({
-              "algorithm":"Nifti2GisConverter",
-              "parameters":{
-                "fileNameIn":t1,
-                "fileNameOut":t1_ima,
-                "outputFormat":"gis",
-                "ascii": False,
-                "verbose": True
-              },
-              "verbose": True
-            })
-            print(f"[T1→GIS] {sid}/{ses} -> {t1_ima}")
-
-        # Mask conversion (required)
-        mask_stash=os.path.join(b,"_qsiprep_mask.txt")
-        if os.path.isfile(mask_stash):
-            with open(mask_stash) as f: mask=f.read().strip()
-            # This helper should: (a) convert mask NIfTI → GIS (mask.ima),
-            # (b) drop identity transforms (dw-to-t1.trm, t1-to-dw.trm) if needed.
-            # Adjust the path if your helper lives elsewhere.
-            subprocess.run([
-              "python3","/work/tools/qsiprep_mask_to_gis.py",
-              "--qsiprep_mask", mask,
-              "--outdir", dir08,
-              "--verbose"
-            ], check=True)
-            print(f"[Mask→GIS] {sid}/{ses} -> {dir08}/mask.ima")
+        t1 = open(t1_stash).read().strip() if os.path.isfile(t1_stash) else ""
+        outdir=os.path.join(b,"08-MaskFromMorphologistPipeline")
+        os.makedirs(outdir, exist_ok=True)
+        cmd=["python3","/work/tools/qsiprep_mask_to_gis.py",
+             "--qsiprep_mask", mask,
+             "--outdir", outdir,
+             "--verbose"]
+        if t1:
+            cmd.extend(["--qsiprep_t1", t1])
+        subprocess.run(cmd, check=True)
+        print(f"[Mask→GIS] {sid}/{ses}")
 PY
 '
+# ---------- Create raw-like dwi/ symlinks for RunPipeline input check ----------
+python3 - <<'PY'
+import os, json, sys
+
+OUT  = os.environ["OUT"]
+with open(os.environ["IN_SUBJ_JSON"], "r") as f:
+    subjects = json.load(f)
+
+def iter_subj_ses(j):
+    if isinstance(j, dict) and "subjects" in j:
+        for rec in j["subjects"]:
+            sid = rec.get("id")
+            for ses in rec.get("sessions", []):
+                yield sid, ses
+    elif isinstance(j, dict) and "patients" in j:
+        for sid, sess in j["patients"].items():
+            for ses in sess: yield sid, ses
+
+for sid, ses in iter_subj_ses(subjects):
+    base = os.path.join(OUT, sid, ses)
+    src  = os.path.join(base, "02-Preproc")
+    dst  = os.path.join(base, "dwi")
+    dwi  = os.path.join(src, "dwi_preproc.nii.gz")
+    bval = os.path.join(src, "dwi_preproc.bval")
+    bvec = os.path.join(src, "dwi_preproc.bvec")
+    if not (os.path.isfile(dwi) and os.path.isfile(bval) and os.path.isfile(bvec)):
+        print(f"[Compat] Missing preproc trio for {sid}/{ses}, skip dwi/ shim"); continue
+    os.makedirs(dst, exist_ok=True)
+    def link(srcf, name):
+        dstf = os.path.join(dst, name)
+        try:
+            if os.path.islink(dstf) or os.path.exists(dstf):
+                os.remove(dstf)
+            os.symlink(srcf, dstf)
+        except Exception:
+            # fallback copy if symlink not allowed
+            import shutil; shutil.copy2(srcf, dstf)
+    link(dwi,  "dwi.nii.gz")
+    link(bval, "dwi.bval")
+    link(bvec, "dwi.bvec")
+    print(f"[Compat] Linked {sid}/{ses} dwi/ -> 02-Preproc trio")
+PY
 
 # ---------- Run the main pipeline in container (early steps OFF) ----------
 apptainer exec --cleanenv \
@@ -209,6 +226,7 @@ apptainer exec --cleanenv \
   --bind "$OUT":/results \
   "$SIF" bash -lc "
   set -e
+  export PYTHONPATH=\"/usr/share/gkg/python:\${PYTHONPATH:-}\"
   python3 /work/Myproject.py \
     -i /results \
     -s /work/config/subjects.json \
@@ -217,3 +235,4 @@ apptainer exec --cleanenv \
     -o /results \
     --verbose
 "
+

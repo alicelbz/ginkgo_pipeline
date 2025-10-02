@@ -1,40 +1,47 @@
 {
-  "DistortionCorrection": "skip",
+  "DistortionCorrection": "none",
   "EddyCurrentCorrection": 0,
   "OutlierCorrection": 0,
-  "SplitDWIShells": 1,
+  "SplitDWIShells": 0,
   "GisConversion": 1,
   "OrientationAndBValueFileDecoding": 0,
   "QSpaceSamplingAddition": 0,
+  "Morphologist": 0,
 
-  "Morphologist": 0,   // we inject mask.ima directly from QSIPrep
   "LocalModelingDTI-B0500": 1,
   "LocalModelingDTI-B1000": 1,
   "LocalModelingDTI-B2000": 1,
   "LocalModelingDTI-B3000": 1,
-  "LocalModelingDTI-Multiple-Shell": 1,
+  "LocalModelingDTI-Multiple-Shell": 0,
+
   "LocalModelingQBI-B0500": 0,
   "LocalModelingQBI-B1000": 0,
   "LocalModelingQBI-B2000": 0,
   "LocalModelingQBI-B3000": 0,
   "LocalModelingQBI-Multiple-Shell": 0,
+
   "NoddiMicrostructureField": 0,
-  "TractographySRD": 1,
-  "FiberLengthHistogramSRD": 1,
-  "LongFiberLabellingSRD": 1,
-  "ShortFiberLabellingSRD": 1,
-  "DiffusionMetricsAlongLongBundlesSRD": 1,
-  "DiffusionMetricsAlongShortBundlesSRD": 1,
+  "TractographySRD": 0,
+  "FiberLengthHistogramSRD": 0,
+  "LongFiberLabellingSRD": 0,
+  "ShortFiberLabellingSRD": 0,
+
+  "DiffusionMetricsAlongLongBundlesSRD": 0,
   "DiffusionMetricsAlongCutExtremitiesLongBundlesSRD": 0,
+  "DiffusionMetricsAlongShortBundlesSRD": 0,
   "DiffusionMetricsAlongCutExtremitiesShortBundlesSRD": 0,
+
   "FreesurferParcellation": 0,
   "DiffusionMetricsInROIs": 0,
   "FastSegmentation": 0,
   "DiffusionMetricsInWhiteGreyMatter": 0,
   "DiffusionMetricsInHippROIs": 0,
+
   "Normalization": 0,
+  "DiffusionMetricsInHippocampiConnectivityTemplate": 0,
   "DiffusionMetricsInFullConnectivityTemplate": 0,
   "DiffusionMetricsInConnectivityMatrix": 0,
   "DiffusionMetricsInMNISpace": 0,
-  "DiffusionMetricsInCutExtremitiesConnectivityMatrix": 0
+  "DiffusionMetricsInCutExtremitiesConnectivityMatrix": 0,
+  "FullConnectivityTemplate": 0
 }
