@@ -1,10 +1,9 @@
-import os, json, sys, shutil, subprocess 
+import os, json, sys, shutil, subprocess, glob
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.sep, 'usr', 'share', 'gkg', 'python'))
 from core.command.CommandFactory import *
 
-import numpy as np
 import matplotlib.mlab as mlab
 import matplotlib.pyplot as plt
 
@@ -193,11 +192,24 @@ def _attach_gradients_to_gis(ima_path, bval_path, bvec_path, verbose=False):
         if verbose:
             print(f"[Attach] wrote {os.path.basename(p)}")
 
+def assert_gis_has_gradients(ima_path, label):
+    """Crash early with a clear message if .dim.minf is missing required keys."""
+    base, _ = os.path.splitext(ima_path)
+    dim_minf = base + ".dim.minf"
+    if not os.path.isfile(dim_minf):
+        raise RuntimeError(f"[MINF] Missing {dim_minf} for {label}")
+    ns = {}
+    with open(dim_minf, "r") as f:
+        exec(f.read(), ns)
+    attrs = ns.get("attributes", {})
+    if "diffusion_gradient_orientations" not in attrs:
+        raise RuntimeError(f"[MINF] {dim_minf} missing diffusion_gradient_orientations for {label}")
 
 
 # ---------------------------------------------------------------------
 # Main pipeline (NIfTI input only; GIS only where reference pipeline used it)
 # ---------------------------------------------------------------------
+    # session_id is just the BIDS session (e.g., ses-20241220)
 
 def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, outputDirectory, verbose):
     _ensure_dir(outputDirectory)
@@ -207,6 +219,14 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
         subjects = json.load(f)
     with open(taskJsonFileName, "r") as f:
         taskDescription = json.load(f)
+
+    # Optional safety: warn if someone accidentally supplied a profiled tasks file
+    if any(isinstance(v, dict) for v in taskDescription.values()):
+        raise ValueError(
+            "tasks_qsiprep.json looks nested (profiles like V1/V2). "
+            "This pipeline expects a flat dict of 0/1 flags."
+        )
+
 
     for subject, ses in _subjects_from_json(subjects):
         if ses is None:
@@ -243,11 +263,13 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
         dir06_orient  = makeDirectory(subj_out, "06-OrientationAndBValueFileDecoding")
         dir07_qs      = makeDirectory(subj_out, "07-QSpaceSamplingAddition")
         dir08_morph   = makeDirectory(subj_out, "08-MaskFromMorphologistPipeline")
+        
+        subjectOutputDirectory = subj_out  
 
         # -----------------------------------------------------------------
         # 01) Distortion correction (TopUp OR Fieldmap OR passthrough)
         # -----------------------------------------------------------------
-        method  = _pick_distortion_method(taskDescription, session_dir)
+        method  = _pick_distortion_method(taskDescription, session_dir)  # "topup" | "fieldmap" | None
         if verbose:
             print(f"[01] DistortionCorrection method = {method or 'none (skip)'}")
 
@@ -256,7 +278,7 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
         bvec_dc  = os.path.join(dir01_dc, "dwi_dc.bvec")
 
         did_dc = False
-        if method == "topup":
+        if method == "topup" and _safe(taskDescription, "DistortionCorrection", 1) != 0:
             runTopUpCorrection(session_dir, dir01_dc, verbose)
             maybe = os.path.join(dir01_dc, "dwi_topup.nii.gz")
             if os.path.isfile(maybe) and not os.path.isfile(dwi_dc):
@@ -265,7 +287,7 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
             shutil.copy2(bvec_4d, bvec_dc)
             did_dc = os.path.isfile(dwi_dc)
 
-        elif method == "fieldmap":
+        elif method == "fieldmap" and _safe(taskDescription, "DistortionCorrection", 1) != 0:
             runFieldmapCorrection(
                 subjectSessionDir=session_dir,
                 dwi=dwi_4d, bval=bval_4d, bvec=bvec_4d,
@@ -276,6 +298,7 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
             did_dc = os.path.isfile(dwi_dc)
 
         else:
+            # explicit "none" OR task flag disabled -> passthrough
             shutil.copy2(dwi_4d,  dwi_dc)
             shutil.copy2(bval_4d, bval_dc)
             shutil.copy2(bvec_4d, bvec_dc)
@@ -292,13 +315,13 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
         bval_preproc = os.path.join(dir02_eddy, "dwi_preproc.bval")
         bvec_preproc = os.path.join(dir02_eddy, "dwi_preproc.bvec")
 
-        if _safe(taskDescription, "EddyCurrentCorrection", 1) == 1:
+        if _safe(taskDescription, "EddyCurrentCorrection", 0) == 1:
             runEddyCurrentAndMotionCorrection(
                 inputDirectory=dir01_dc,     # expects dwi_dc + bval/bvec
                 outputDirectory=dir02_eddy,
                 verbose=verbose
             )
-            # In case your eddy wrapper didn’t copy grads:
+            # Ensure grads are present:
             if not os.path.isfile(bval_preproc): shutil.copy2(bval_dc, bval_preproc)
             if not os.path.isfile(bvec_preproc): shutil.copy2(bvec_dc, bvec_preproc)
         else:
@@ -320,9 +343,9 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
                 outputDirectory=dir03_outlier,
                 verbose=verbose
             )
-            dwi_ready  = os.path.join(dir03_outlier, "dwi_outliercorr.nii.gz") \
-                        if os.path.isfile(os.path.join(dir03_outlier, "dwi_outliercorr.nii.gz")) \
-                        else dwi_preproc
+            dwi_ready  = (os.path.join(dir03_outlier, "dwi_outliercorr.nii.gz")
+                        if os.path.isfile(os.path.join(dir03_outlier, "dwi_outliercorr.nii.gz"))
+                        else dwi_preproc)
             bval_ready = bval_preproc
             bvec_ready = bvec_preproc
         else:
@@ -330,13 +353,12 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
 
         # -----------------------------------------------------------------
         # 04) Split shells (on corrected 4D) → still NIfTI here
-        #     If results already exist (because we split on the host), skip.
+        #     (guarded by SplitDWIShells flag; skip if already present)
         # -----------------------------------------------------------------
+        do_split = (_safe(taskDescription, "SplitDWIShells", 0) == 1)
         have_split = bool(glob.glob(os.path.join(dir04_split, "dwi_b*.nii.gz")))
-        if have_split:
-            if verbose:
-                print("[04] SplitDWIShells: found existing outputs -> skip")
-        else:
+
+        if do_split and not have_split:
             tmp_session = os.path.join(dir04_split, "_tmp_session")
             _ensure_dir(os.path.join(tmp_session, "dwi"))
             shutil.copy2(dwi_ready,  os.path.join(tmp_session, "dwi", "dwi.nii.gz"))
@@ -365,93 +387,107 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
                 "--outdir",  dir04_split,
                 "--verbose"
             ], check=True)
-
+        elif not do_split and verbose:
+            print("[04] SplitDWIShells disabled by tasks file.")
 
         # -----------------------------------------------------------------
-        # 05) GIS conversion (per shell) + T1 (GIS used where reference used it)
+        # 05) GIS conversion (per shell) + T1 (guarded by GisConversion flag)
         # -----------------------------------------------------------------
         shell_tags = ["b0000", "b0500", "b1000", "b2000", "b3000"]
 
-        # T1 → GIS (for Morphologist)
-        t1_nii = os.path.join(session_dir, "anat", "T1w.nii.gz")
-        if os.path.isfile(t1_nii):
-            t1_ima = os.path.join(dir05_gis, "T1w.ima")
-            CommandFactory().executeCommand({
-                "algorithm": "Nifti2GisConverter",
-                "parameters": {
-                    "fileNameIn":  str(t1_nii),
-                    "fileNameOut": str(t1_ima),
-                    "outputFormat":"gis",
-                    "ascii": False,
+        if _safe(taskDescription, "GisConversion", 0) == 1:
+            # T1 → GIS (for Morphologist)
+            t1_nii = os.path.join(session_dir, "anat", "T1w.nii.gz")
+            if os.path.isfile(t1_nii):
+                t1_ima = os.path.join(dir05_gis, "T1w.ima")
+                CommandFactory().executeCommand({
+                    "algorithm": "Nifti2GisConverter",
+                    "parameters": {
+                        "fileNameIn":  str(t1_nii),
+                        "fileNameOut": str(t1_ima),
+                        "outputFormat":"gis",
+                        "ascii": False,
+                        "verbose": verbose
+                    },
                     "verbose": verbose
-                },
-                "verbose": verbose
-            })
-            removeMinf(t1_ima)
-        else:
-            print(f"[WARN] Missing T1: {t1_nii}")
+                })
+                removeMinf(t1_ima)
+            else:
+                if verbose: print(f"[WARN] Missing T1: {t1_nii}")
 
-        # DWI per shell → GIS (keeps compatibility with downstream GIS consumers)
-        for tag in shell_tags:
-            nii  = os.path.join(dir04_split, f"dwi_{tag}.nii.gz")
-            if not os.path.isfile(nii):
-                continue
-            out_ima = os.path.join(dir05_gis, f"DWI_{tag}.ima")
-            CommandFactory().executeCommand({
-                "algorithm": "Nifti2GisConverter",
-                "parameters": {
-                    "fileNameIn":  str(nii),
-                    "fileNameOut": str(out_ima),
-                    "outputFormat":"gis",
-                    "ascii": False,
+            # DWI per shell → GIS
+            for tag in shell_tags:
+                nii  = os.path.join(dir04_split, f"dwi_{tag}.nii.gz")
+                if not os.path.isfile(nii):
+                    continue
+                out_ima = os.path.join(dir05_gis, f"DWI_{tag}.ima")
+                CommandFactory().executeCommand({
+                    "algorithm": "Nifti2GisConverter",
+                    "parameters": {
+                        "fileNameIn":  str(nii),
+                        "fileNameOut": str(out_ima),
+                        "outputFormat":"gis",
+                        "ascii": False,
+                        "verbose": verbose
+                    },
                     "verbose": verbose
-                },
-                "verbose": verbose
-            })
-            removeMinf(out_ima)
+                })
+                # remove auto .minf so we fully control metadata
+                removeMinf(out_ima)
+        else:
+            if verbose: print("[05] GisConversion disabled by tasks file.")
 
         # -----------------------------------------------------------------
         # 05b) Ensure a T2 surrogate for modeling (use b0 as proxy)
         # -----------------------------------------------------------------
-        b0_nii = os.path.join(dir04_split, "dwi_b0000.nii.gz")
-        t2_ima = os.path.join(dir04_split, "t2_wo_eddy_current.ima")
-        if os.path.isfile(b0_nii) and not os.path.isfile(t2_ima):
-            CommandFactory().executeCommand({
-                "algorithm": "Nifti2GisConverter",
-                "parameters": {
-                    "fileNameIn":  str(b0_nii),
-                    "fileNameOut": str(t2_ima),
-                    "outputFormat":"gis",
-                    "ascii": False,
+        if _safe(taskDescription, "GisConversion", 0) == 1:
+            b0_nii = os.path.join(dir04_split, "dwi_b0000.nii.gz")
+            t2_ima = os.path.join(dir04_split, "t2_wo_eddy_current.ima")
+            if os.path.isfile(b0_nii) and not os.path.isfile(t2_ima):
+                CommandFactory().executeCommand({
+                    "algorithm": "Nifti2GisConverter",
+                    "parameters": {
+                        "fileNameIn":  str(b0_nii),
+                        "fileNameOut": str(t2_ima),
+                        "outputFormat":"gis",
+                        "ascii": False,
+                        "verbose": verbose
+                    },
                     "verbose": verbose
-                },
-                "verbose": verbose
-            })
-            # keep .minf: modeling doesn’t need one for T2
+                })
+                # keep .minf: modeling doesn't need one for T2
 
         # -----------------------------------------------------------------
-        # 05c) Attach gradients/bvals to each per-shell GIS
-        # (so DwiTensorField finds 'diffusion_gradient_orientations')
+        # 05c) Attach gradients/bvals to each per-shell GIS (with the CLI tool)
+        #     so DwiTensorField finds 'diffusion_gradient_orientations'
         # -----------------------------------------------------------------
-        shell_map = {
-            "b0500": ("dwi_b0500.bval", "dwi_b0500.bvec", "DWI_b0500.ima"),
-            "b1000": ("dwi_b1000.bval", "dwi_b1000.bvec", "DWI_b1000.ima"),
-            "b2000": ("dwi_b2000.bval", "dwi_b2000.bvec", "DWI_b2000.ima"),
-            "b3000": ("dwi_b3000.bval", "dwi_b3000.bvec", "DWI_b3000.ima"),
-        }
-        for tag,(bval_name,bvec_name,ima_name) in shell_map.items():
-            bval_p = os.path.join(dir04_split, bval_name)
-            bvec_p = os.path.join(dir04_split, bvec_name)
-            ima_p  = os.path.join(dir05_gis,  ima_name)
-            if os.path.isfile(ima_p) and os.path.isfile(bval_p) and os.path.isfile(bvec_p):
-                try:
-                    _attach_gradients_to_gis(ima_p, bval_p, bvec_p, verbose=verbose)
-                except Exception as e:
-                    print(f"[WARN] Could not attach gradients to {ima_p}: {e}")
-# -----------------------------------------------------------------
+        if _safe(taskDescription, "GisConversion", 0) == 1:
+            shell_map = {
+                "b0500": ("dwi_b0500.bval", "dwi_b0500.bvec", "DWI_b0500.ima",  500.0),
+                "b1000": ("dwi_b1000.bval", "dwi_b1000.bvec", "DWI_b1000.ima", 1000.0),
+                "b2000": ("dwi_b2000.bval", "dwi_b2000.bvec", "DWI_b2000.ima", 2000.0),
+                "b3000": ("dwi_b3000.bval", "dwi_b3000.bvec", "DWI_b3000.ima", 3000.0),
+            }
+            for tag,(bval_name,bvec_name,ima_name, shell_b) in shell_map.items():
+                bval_p = os.path.join(dir04_split, bval_name)
+                bvec_p = os.path.join(dir04_split, bvec_name)
+                ima_p  = os.path.join(dir05_gis,  ima_name)
+                if os.path.isfile(ima_p) and os.path.isfile(bvec_p):
+                    # Prefer real bvals if present; else force the shell value
+                    cmd = ["python3", "/work/tools/add_gradients_to_ima.py", "--ima", ima_p, "--bvec", bvec_p]
+                    if os.path.isfile(bval_p):
+                        cmd += ["--bval", bval_p]
+                    else:
+                        cmd += ["--shell_bvalue", str(shell_b)]
+                    try:
+                        subprocess.run(cmd, check=True)
+                    except Exception as e:
+                        print(f"[WARN] Could not attach gradients to {ima_p}: {e}")
+
+        # -----------------------------------------------------------------
         # 06) Orientation & BValue decoding (bridge GIS metadata + NIfTI)
         # -----------------------------------------------------------------
-        if _safe(taskDescription, "OrientationAndBValueFileDecoding", 1) == 1:
+        if _safe(taskDescription, "OrientationAndBValueFileDecoding", 0) == 1:
             runOrientationAndBValueFileDecoding(
                 outputDirectoryGisConversion=dir05_gis,     # GIS per-shell + T1
                 outputDirectoryTopUpCorrection=dir01_dc,    # NIfTI (dwi_dc + grads) — compat
@@ -464,13 +500,13 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
         # -----------------------------------------------------------------
         # 07) Q-Space sampling (NIfTI)
         # -----------------------------------------------------------------
-        if _safe(taskDescription, "QSpaceSamplingAddition", 1) == 1:
+        if _safe(taskDescription, "QSpaceSamplingAddition", 0) == 1:
             runQSpaceSamplingAddition(dir06_orient, dir07_qs, verbose)
 
         # -----------------------------------------------------------------
         # 08) Morphologist (GIS-based)
         # -----------------------------------------------------------------
-        if _safe(taskDescription, "Morphologist", 1) == 1:
+        if _safe(taskDescription, "Morphologist", 0) == 1:
             runMaskFromMorphologistPipeline(
                 dir05_gis,                      # GIS: T1w.ima + DWI shells (if needed)
                 dir07_qs,                       # NIfTI gradients q-space (if your func expects)
