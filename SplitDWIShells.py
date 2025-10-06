@@ -22,6 +22,7 @@ Usage:
 
 import os
 import sys
+import gzip
 import argparse
 import numpy as np
 
@@ -97,7 +98,29 @@ def run_split(
         out_bvec = os.path.join(out_dir, f"dwi_{tag}.bvec")
 
         sub = data[..., idx]
-        nib.Nifti1Image(sub, aff, hdr).to_filename(out_nii)
+        try:
+            # First try: create new header with correct shape
+            new_hdr = hdr.copy()
+            new_hdr.set_data_shape(sub.shape)
+            nib.Nifti1Image(sub, aff, new_hdr).to_filename(out_nii)
+        except Exception as e:
+            if verbose:
+                print(f"[warn] primary nibabel save failed for {tag}, trying fallback: {e}")
+            try:
+                # Fallback 1: use nibabel save without explicit header
+                nib.Nifti1Image(sub, aff).to_filename(out_nii)
+            except Exception as e2:
+                if verbose:
+                    print(f"[warn] fallback nibabel save failed for {tag}, trying numpy: {e2}")
+                # Fallback 2: save as uncompressed and then compress
+                temp_nii = out_nii.replace('.nii.gz', '_temp.nii')
+                nib.Nifti1Image(sub.astype(np.float32), aff).to_filename(temp_nii)
+                import gzip
+                with open(temp_nii, 'rb') as f_in:
+                    with gzip.open(out_nii, 'wb') as f_out:
+                        f_out.write(f_in.read())
+                os.remove(temp_nii)
+        
         np.savetxt(out_bval, bvals[idx][None, :], fmt="%.0f")
         np.savetxt(out_bvec, bvecs[:, idx], fmt="%.6f")
 

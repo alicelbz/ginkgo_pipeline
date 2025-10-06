@@ -226,8 +226,8 @@ fi
 
 # ---------- Run the main pipeline in container ----------
 apptainer exec --cleanenv \
-  --bind "$PROJ":/work \
-  --bind "$OUT":/results \
+  --bind /wynton/scratch/aleberre/projects/Ginkgo_pipeline:/work \
+  --bind /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results:/results \
   "$SIF" bash -lc '
 set -e
 export PYTHONPATH="/usr/share/gkg/python:${PYTHONPATH:-}"

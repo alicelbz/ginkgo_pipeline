@@ -1,0 +1,3 @@
+=== [QSIPrep Alt] IN_QSI=/wynton/protected/group/rsl/PRESIDIO/data/BIDS/derivatives/qsiprep  OUT=/wynton/scratch/aleberre/projects/Ginkgo_pipeline/results
+sub-PR07	ses-20241220
+[Stage] sub-PR07/ses-20241220 -> 02-Preproc (mask=yes, T1w=yes)

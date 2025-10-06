@@ -2,6 +2,27 @@ import os, json, sys, shutil, subprocess, glob
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.sep, 'usr', 'share', 'gkg', 'python'))
+# Ensure project tools are on path so we can inject a Volume compatibility shim
+# This helps in containers where `gkg` doesn't expose a top-level Volume class.
+try:
+    tools_candidates = [
+        "/work/tools",
+        os.path.join(os.path.dirname(__file__), "tools"),
+        os.path.join(os.getcwd(), "tools"),
+    ]
+    for p in tools_candidates:
+        if os.path.isdir(p) and p not in sys.path:
+            sys.path.insert(0, p)
+    try:
+        import ensure_gkg_volume
+        ok, msg = ensure_gkg_volume.ensure()
+        # print to stdout so users running the pipeline see what happened
+        print(f"[ensure_gkg_volume] {ok}: {msg}")
+    except Exception as _e:
+        # non-fatal; continue without injection
+        print(f"[ensure_gkg_volume] import or ensure failed: {_e}")
+except Exception:
+    pass
 from core.command.CommandFactory import *
 
 import matplotlib.mlab as mlab
@@ -146,6 +167,26 @@ def _pick_distortion_method(taskDescription, session_dir):
     if _safe(taskDescription, "FieldmapCorrection", 0) == 1:
         return "fieldmap"
     return _distortion_method_auto(session_dir)
+
+
+def _log_minf(ima_path, label, verbose=False):
+    """Log the primary .dim.minf contents for ima_path if present."""
+    base, _ = os.path.splitext(ima_path)
+    dim_minf = base + ".dim.minf"
+    print(f"[MINF-DEBUG] {label}: {ima_path}")
+    if os.path.isfile(dim_minf):
+        try:
+            if verbose:
+                print(f"[MINF-DEBUG] contents of {dim_minf}:")
+                with open(dim_minf, 'r') as f:
+                    for ln in f:
+                        print(ln.rstrip())
+            else:
+                print(f"[MINF-DEBUG] {dim_minf} exists")
+        except Exception as e:
+            print(f"[MINF-DEBUG] failed to read {dim_minf}: {e}")
+    else:
+        print(f"[MINF-DEBUG] {dim_minf} MISSING")
 
 def _attach_gradients_to_gis(ima_path, bval_path, bvec_path, verbose=False):
     """
@@ -533,6 +574,7 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
         outputDirectoryLocalModelingDTIShell1 = makeDirectory(subj_out, "09-LocalModeling-DTI-B0500")
         fileNameDwShell1 = dw_ima_0500
         if os.path.isfile(fileNameDwShell1) and _safe(taskDescription, "LocalModelingDTI-B0500", 0) == 1:
+            _log_minf(fileNameDwShell1, 'DTI-B0500', verbose=verbose)
             runLocalModelingDTI(
                 fileNameDwShell1,
                 outputDirectoryEddyCurrentAndMotionCorrection,
@@ -545,6 +587,7 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
         outputDirectoryLocalModelingDTIShell2 = makeDirectory(subj_out, "10-LocalModeling-DTI-B1000")
         fileNameDwShell2 = dw_ima_1000
         if os.path.isfile(fileNameDwShell2) and _safe(taskDescription, "LocalModelingDTI-B1000", 0) == 1:
+            _log_minf(fileNameDwShell2, 'DTI-B1000', verbose=verbose)
             runLocalModelingDTI(
                 fileNameDwShell2,
                 outputDirectoryEddyCurrentAndMotionCorrection,
@@ -557,6 +600,7 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
         outputDirectoryLocalModelingDTIShell3 = makeDirectory(subj_out, "11-LocalModeling-DTI-B2000")
         fileNameDwShell3 = dw_ima_2000
         if os.path.isfile(fileNameDwShell3) and _safe(taskDescription, "LocalModelingDTI-B2000", 0) == 1:
+            _log_minf(fileNameDwShell3, 'DTI-B2000', verbose=verbose)
             runLocalModelingDTI(
                 fileNameDwShell3,
                 outputDirectoryEddyCurrentAndMotionCorrection,
@@ -569,6 +613,7 @@ def runPipeline(inputNiftiRoot, subjectJsonFileName, taskJsonFileName, session, 
         outputDirectoryLocalModelingDTIShell4 = makeDirectory(subj_out, "12-LocalModeling-DTI-B3000")
         fileNameDwShell4 = dw_ima_3000
         if os.path.isfile(fileNameDwShell4) and _safe(taskDescription, "LocalModelingDTI-B3000", 0) == 1:
+            _log_minf(fileNameDwShell4, 'DTI-B3000', verbose=verbose)
             runLocalModelingDTI(
                 fileNameDwShell4,
                 outputDirectoryEddyCurrentAndMotionCorrection,

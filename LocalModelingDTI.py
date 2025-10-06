@@ -54,7 +54,62 @@ def _inject_gradients_with_tool(ima_path, bval_path, bvec_path, shell_b=None, ve
         cmd += ["--shell_bvalue", str(shell_b)]
     if verbose:
         print("[inject]", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True)
+        return True
+    except Exception as e:
+        if verbose:
+            print(f"[inject][warn] injector failed: {e}")
+        return False
+
+
+def _write_minf_from_bvec_bval(ima_path, bval_path, bvec_path, shell_b=None, verbose=False):
+    """Directly write MINF sidecars from bvec/bval files (fallback).
+    Returns True on success, False otherwise.
+    """
+    try:
+        # Read bvecs (3 rows: x, y, z)
+        with open(bvec_path, "r") as f:
+            rows = [ln.strip().split() for ln in f if ln.strip()]
+        if len(rows) < 3:
+            if verbose: print(f"[fallback] invalid bvec: {bvec_path}")
+            return False
+        grads = list(map(list, zip(*[[float(x) for x in row] for row in rows])))
+
+        # Read bvals
+        if bval_path and os.path.isfile(bval_path):
+            with open(bval_path, "r") as f:
+                bvals = [float(x) for x in f.read().strip().split()]
+        elif shell_b is not None:
+            bvals = [float(shell_b)] * len(grads)
+        else:
+            if verbose: print(f"[fallback] missing bval and no shell_b provided")
+            return False
+
+        if len(bvals) != len(grads):
+            if verbose: print(f"[fallback] bval/bvec length mismatch: {len(bvals)} vs {len(grads)}")
+            return False
+
+        attrs = {
+            'diffusion_gradient_orientations': grads,
+            'diffusion_b_values': bvals,
+        }
+        body = "attributes = " + repr(attrs) + "\n"
+
+        base, ext = os.path.splitext(ima_path)
+        minf_dim = base + ".dim.minf"
+        minf_raw = base + ".minf"
+        minf_ima = ima_path + ".minf"
+        for p in (minf_dim, minf_raw, minf_ima):
+            with open(p, "w") as f:
+                f.write(body)
+            if verbose:
+                print(f"[fallback] wrote {p}")
+        return True
+    except Exception as e:
+        if verbose:
+            print(f"[fallback] exception while writing MINF: {e}")
+        return False
 
 
 # -----------------------------
@@ -70,6 +125,7 @@ def runLocalModelingDTI(fileNameDw,
     subjectDirectoryEddyCurrentAndMotionCorrection: we use this as 04-SplitDWIShells
        (holds t2_wo_eddy_current.ima and per-shell bval/bvec)
     """
+    print("*** ENTERING LocalModelingDTI with:", fileNameDw)
     if verbose:
         print("LOCAL MODELING USING DTI MODEL")
         print("-------------------------------------------------------------")
@@ -105,13 +161,23 @@ def runLocalModelingDTI(fileNameDw,
                 shell_b = None
         if not os.path.isfile(bvec) and verbose:
             print(f"[preflight][warn] missing {bvec}")
-        _inject_gradients_with_tool(
+        injected = _inject_gradients_with_tool(
             fileNameDw,
             bval_path=bval if os.path.isfile(bval) else None,
             bvec_path=bvec,
             shell_b=shell_b,
             verbose=verbose
         )
+        if not injected:
+            if verbose:
+                print("[preflight] injector failed, attempting direct MINF write fallback")
+            _write_minf_from_bvec_bval(
+                fileNameDw,
+                bval_path=bval if os.path.isfile(bval) else None,
+                bvec_path=bvec,
+                shell_b=shell_b,
+                verbose=verbose
+            )
         # re-check
         attrs, src_minf = _read_minf_attrs(fileNameDw)
         if verbose and src_minf:
@@ -121,12 +187,70 @@ def runLocalModelingDTI(fileNameDw,
         print(f"[preflight][warn] gradients still not visible in MINF for {fileNameDw}; "
               f"continuing, but DwiTensorField may fail.")
 
+    # --- FORCE gradients into GIS header using Combiner workaround ---
+    temp_dw_with_gradients = fileNameDw  # default to original
+    try:
+        attrs, _ = _read_minf_attrs(fileNameDw)
+        if _has_gradients(attrs):
+            if verbose:
+                print(f"[force-inject] creating temp DW with embedded gradients")
+            
+            # Create a temporary file with embedded gradients using Combiner
+            temp_dw_with_gradients = fileNameDw.replace('.ima', '_with_gradients.ima')
+            
+            # First copy the file using Combiner (this preserves most metadata)
+            gkg.executeCommand({
+                'algorithm': 'Combiner',
+                'parameters': {
+                    'fileNameIns': str(fileNameDw),
+                    'fileNameOut': str(temp_dw_with_gradients),
+                    'functor1s': 'id',
+                    'functor2s': 'id', 
+                    'numerator1s': (1.0, 1.0),
+                    'denominator1s': (1.0, 1.0),
+                    'numerator2s': 1.0,
+                    'denominator2s': 1.0,
+                    'operators': '*',
+                    'fileNameMask': '',
+                    'mode': 'gt',
+                    'threshold1': 0.0,
+                    'threshold2': 0.0,
+                    'background': 0.0,
+                    'outputType': 'float',
+                    'ascii': False,
+                    'format': 'gis',
+                    'verbose': verbose,
+                },
+                'verbose': verbose
+            })
+            
+            # Write all MINF variants for the temp file
+            _write_minf_from_bvec_bval(
+                temp_dw_with_gradients,
+                bval_path=bval if os.path.isfile(bval) else None,
+                bvec_path=bvec,
+                shell_b=shell_b,
+                verbose=verbose
+            )
+            
+            if verbose:
+                print(f"[force-inject] using temp file with gradients: {temp_dw_with_gradients}")
+                print(f"[force-inject] temp file exists: {os.path.exists(temp_dw_with_gradients)}")
+    except Exception as e:
+        if verbose:
+            print(f"[force-inject][warn] failed to create temp file: {e}")
+        temp_dw_with_gradients = fileNameDw  # fallback to original
+
+    if verbose:
+        print(f"[DEBUG] Final DW file to use: {temp_dw_with_gradients}")
+        print(f"[DEBUG] DW file exists: {os.path.exists(temp_dw_with_gradients)}")
+
     # --- Main tensor computation with mask ---
     gkg.executeCommand({
         'algorithm': 'DwiTensorField',
         'parameters': {
             'fileNameT2': str(fileNameT2),
-            'fileNameDW': str(fileNameDw),
+            'fileNameDW': str(temp_dw_with_gradients),  # Use temp file if created
             'fileNameMask': fileNameMask,
             'tensorFunctorNames': ('fa', 'rgb', 'adc', 'lambda_parallel', 'lambda_transverse'),
             'outputFileNames': (
@@ -160,7 +284,7 @@ def runLocalModelingDTI(fileNameDw,
         'algorithm': 'DwiTensorField',
         'parameters': {
             'fileNameT2': fileNameT2,
-            'fileNameDW': fileNameDw,
+            'fileNameDW': temp_dw_with_gradients,  # Use temp file if created
             'fileNameMask': '',
             'tensorFunctorNames': 'adc',
             'outputFileNames': fileNameADCWoMask,
@@ -181,6 +305,21 @@ def runLocalModelingDTI(fileNameDw,
         },
         'verbose': verbose
     })
+
+    # --- Cleanup temp file if created ---
+    if temp_dw_with_gradients != fileNameDw:
+        try:
+            os.remove(temp_dw_with_gradients)
+            os.remove(temp_dw_with_gradients.replace('.ima', '.dim'))
+            for ext in ['.dim.minf', '.ima.minf', '.minf']:
+                temp_minf = temp_dw_with_gradients.replace('.ima', ext)
+                if os.path.exists(temp_minf):
+                    os.remove(temp_minf)
+            if verbose:
+                print(f"[cleanup] removed temp file: {temp_dw_with_gradients}")
+        except Exception as e:
+            if verbose:
+                print(f"[cleanup][warn] failed to remove temp files: {e}")
 
     if verbose:
         print("-------------------------------------------------------------")

@@ -1,0 +1,43 @@
+=== [QSIPrep Alt] IN_QSI=/wynton/protected/group/rsl/PRESIDIO/data/BIDS/derivatives/qsiprep  OUT=/wynton/scratch/aleberre/projects/Ginkgo_pipeline/results
+sub-PR07	ses-20241220
+[Stage] sub-PR07/ses-20241220 -> 02-Preproc (mask=yes, T1w=yes)
+[SplitDWIShells] DWI:  /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/_tmp_session/dwi/dwi.nii.gz
+[SplitDWIShells] bval: /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/_tmp_session/dwi/dwi.bval
+[SplitDWIShells] bvec: /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/_tmp_session/dwi/dwi.bvec
+[SplitDWIShells] shape=(95, 116, 101, 104), nvols=104
+[ok]  /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/dwi_b0000.nii.gz  vols=8
+      /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/dwi_b0000.bval
+      /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/dwi_b0000.bvec
+[ok]  /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/dwi_b0500.nii.gz  vols=6
+      /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/dwi_b0500.bval
+      /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/dwi_b0500.bvec
+[ok]  /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/dwi_b1000.nii.gz  vols=15
+      /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/dwi_b1000.bval
+      /wynton/scratch/aleberre/projects/Ginkgo_pipeline/results/sub-PR07/ses-20241220/04-SplitDWIShells/dwi_b1000.bvec
+Traceback (most recent call last):
+  File "/wynton/scratch/aleberre/projects/Ginkgo_pipeline/SplitDWIShells.py", line 135, in <module>
+    main()
+  File "/wynton/scratch/aleberre/projects/Ginkgo_pipeline/SplitDWIShells.py", line 123, in main
+    run_split(
+  File "/wynton/scratch/aleberre/projects/Ginkgo_pipeline/SplitDWIShells.py", line 100, in run_split
+    nib.Nifti1Image(sub, aff, hdr).to_filename(out_nii)
+  File "/wynton/protected/home/rsl/aleberre/.local/lib/python3.11/site-packages/nibabel/filebasedimages.py", line 308, in to_filename
+    self.to_file_map(**kwargs)
+  File "/wynton/protected/home/rsl/aleberre/.local/lib/python3.11/site-packages/nibabel/nifti1.py", line 2377, in to_file_map
+Traceback (most recent call last):
+  File "<stdin>", line 18, in <module>
+  File "/usr/lib64/python3.11/subprocess.py", line 550, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.11/subprocess.py", line 1201, in communicate
+    self.wait()
+  File "/usr/lib64/python3.11/subprocess.py", line 1264, in wait
+    return self._wait(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.11/subprocess.py", line 2053, in _wait
+    (pid, sts) = self._try_wait(0)
+                 ^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.11/subprocess.py", line 2011, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
